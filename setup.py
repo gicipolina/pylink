@@ -1,294 +1,185 @@
-# Copyright 2017 Square, Inc.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
+from seleniumbase import SB
+import time
+import requests
 import sys
-
-# Stub the 'psutil' module that is required by this package in order to enable
-# the main module to be imported.
-try:
-    import psutil
-except ImportError:
-    sys.modules['psutil'] = {}
-
-try:
-    import six
-except ImportError:
-    sys.modules['six'] = {}
-
-import pylink
-
+import requests
 import os
-import setuptools
-import shutil
+import random
 import subprocess
+from dataclasses import dataclass
+from typing import List, Optional
+
+def stop_warp():
+    try:
+        # Check WARP status
+        status_result = subprocess.run(["warp-cli", "status"], capture_output=True, text=True)
+        print("WARP Status:")
+        print(status_result.stdout)
+        # If WARP is connected, disconnect it
+        if "Connected" in status_result.stdout:
+            print("Stopping WARP...")
+            disconnect_result = subprocess.run(["sudo", "warp-cli", "disconnect"], check=True)
+            print("WARP stopped successfully.")
+        else:
+            print("WARP is not currently connected.")
+    except subprocess.CalledProcessError as e:
+        print(f"An error occurred while stopping WARP: {e}")
 
 
-class CleanCommand(setuptools.Command):
-    """Custom clean command."""
-
-    description = 'clean the project build files'
-
-    user_options = []
-
-    def initialize_options(self):
-        """Initialize the Command.
-
-        Args:
-          self (CleanCommand): the ``CleanCommand`` instance
-
-        Returns:
-          ``None``
-        """
-        self.cwd = None
-        self.build_dirs = None
-        self.build_artifacts = None
-
-    def finalize_options(self):
-        """Populate the attributes.
-
-        Args:
-          self (CleanCommand): the ``CleanCommand`` instance
-
-        Returns:
-          ``None``
-        """
-        self.cwd = os.path.abspath(os.path.dirname(__file__))
-        self.build_dirs = [
-            os.path.join(self.cwd, 'build'),
-            os.path.join(self.cwd, 'htmlcov'),
-            os.path.join(self.cwd, 'dist'),
-            os.path.join(self.cwd, 'pylink_square.egg-info')
-        ]
-        self.build_artifacts = ['.pyc', '.o', '.elf', '.bin']
-
-    def run(self):
-        """Runs the command.
-
-        Args:
-          self (CleanCommand): the ``CleanCommand`` instance
-
-        Returns:
-          ``None``
-        """
-        for build_dir in self.build_dirs:
-            if os.path.isdir(build_dir):
-                sys.stdout.write('Removing %s%s' % (build_dir, os.linesep))
-                shutil.rmtree(build_dir)
-
-        for (root, dirs, files) in os.walk(self.cwd):
-            for name in files:
-                fullpath = os.path.join(root, name)
-                if any(fullpath.endswith(ext) for ext in self.build_artifacts):
-                    sys.stdout.write('Removing %s%s' % (fullpath, os.linesep))
-                    os.remove(fullpath)
+def start_warp():
+    try:
+        # Check WARP status
+        status_result = subprocess.run(["warp-cli", "status"], capture_output=True, text=True)
+        print("WARP Status:")
+        print(status_result.stdout)
+        # Start WARP if not already connected
+        if "Connected" not in status_result.stdout:
+            print("Starting WARP...")
+            subprocess.run(["sudo", "warp-cli", "--accept-tos", "connect"], check=True)
+            print("WARP started successfully.")
+        else:
+            print("WARP is already connected.")
+    except subprocess.CalledProcessError as e:
+        print(f"An error occurred while managing WARP: {e}")
 
 
-class CoverageCommand(setuptools.Command):
-    """Custom command for generating coverage information."""
+def testtw():
+    # Retrieve environment variables
+    channel = "brutalles"
+    authorization = "cnyavwlzoecwrspww62frgp6jqpxc7"
+    client_id = "gp762nuuoqcoxypju8c569th9wz7q5"
 
-    description = 'generate coverage information'
+    if not channel or not authorization or not client_id:
+        print("Missing required environment variables: CHANNEL, AUTHORIZATION, or TCLIENTID.")
+        return False
 
-    user_options = []
-
-    def initialize_options(self):
-        """Initializes the command.
-
-        Args:
-          self (CoverageCommand): the ``CoverageCommand`` instance
-
-        Returns:
-          ``None``
-        """
-        self.cwd = None
-        self.test_dir = None
-
-    def finalize_options(self):
-        """Finalizes the command's options.
-
-        Args:
-          self (CoverageCommand): the ``CoverageCommand`` instance
-
-        Returns:
-          ``None``
-        """
-        self.cwd = os.path.abspath(os.path.dirname(__file__))
-        self.test_dir = os.path.join(self.cwd, 'tests')
-
-    def run(self):
-        """Runs the command to generate coverage information.
-
-        Args:
-          self (CoverageCommand): the ``CoverageCommand`` instance
-
-        Returns:
-          ``None``
-        """
-        import coverage
-        subprocess.call(['coverage', 'run', '--source', 'pylink', 'setup.py', 'test'])
-        subprocess.call(['coverage', 'report'])
-        subprocess.call(['coverage', 'html'])
-
-
-class BDDTestCommand(setuptools.Command):
-    """BDD test command."""
-
-    description = 'run the behaviour tests'
-
-    user_options = []
-
-    def initialize_options(self):
-        """Initialize the Command.
-
-        Args:
-          self (BDDTestCommand): the ``BDDTestCommand`` instance
-
-        Returns:
-          ``None``
-        """
-        self.cwd = None
-        self.firmware_dirs = None
-        self.features_dir = None
-
-    def finalize_options(self):
-        """Populate the attributes.
-
-        Args:
-          self (BDDTestCommand): the ``BDDTestCommand`` instance
-
-        Returns:
-          ``None``
-        """
-        self.cwd = os.path.abspath(os.path.dirname(__file__))
-        self.features_dir = os.path.join(self.cwd, 'tests', 'functional', 'features')
-        self.firmware_dirs = []
-
-        root = os.path.join(self.cwd, 'tests', 'functional', 'firmware')
-        for f in os.listdir(root):
-            fullpath = os.path.join(root, f)
-            if os.path.isdir(fullpath):
-                self.firmware_dirs.append(fullpath)
-
-    def run(self):
-        """Runs the command.
-
-        Args:
-          self (BDDTestCommand): the ``BDDTestCommand`` instance
-
-        Returns:
-          ``True`` on success, otherwise ``False``.
-
-        Raises:
-          ValueError: if a build fails
-        """
-        import behave.__main__ as behave
-
-        for d in self.firmware_dirs:
-            original_dir = os.getcwd()
-            os.chdir(d)
-
-            output = ''
-            try:
-                output = subprocess.check_output('make', shell=True, stderr=subprocess.STDOUT)
-            except subprocess.CalledProcessError as e:
-                if output:
-                    sys.stdout.write('Captured Output:%s%s%s' % (os.linesep, output, os.linesep))
-                os.chdir(original_dir)
-                raise e
-
-            os.chdir(original_dir)
-
-        return behave.main([self.features_dir])
-
-
-def long_description():
-    """Reads and returns the contents of the README.
-
-    On failure, returns the project long description.
-
-    Returns:
-      The project's long description.
-    """
-    cwd = os.path.abspath(os.path.dirname(__file__))
-    readme_path = os.path.join(cwd, 'README.md')
-    if not os.path.exists(readme_path):
-        return pylink.__long_description__
+    # Set up the API request
+    url = f"https://api.twitch.tv/helix/streams?user_login={channel}"
+    headers = {
+        "Authorization": f"Bearer {authorization}",
+        "Client-Id": client_id
+    }
 
     try:
-        import pypandoc
-        return pypandoc.convert_file(readme_path, 'rst')
-    except (IOError, ImportError):
-        pass
+        # Send the GET request to the Twitch API
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()  # Raise an exception for HTTP errors
 
-    return open(readme_path, 'r').read()
+        # Check if the response contains "live"
+        if "live" in response.text:
+            return True
+        else:
+            return False
+
+    except requests.exceptions.RequestException as e:
+        print(f"Error occurred: {e}")
+        return False
 
 
-setuptools.setup(
-    # Project information.
-    name='pylink-square',
-    version=pylink.__version__,
-
-    #  Metadata for upload to PyPI.
-    author=pylink.__author__,
-    author_email=pylink.__author_email__,
-    description=pylink.__description__,
-    long_description=long_description(),
-    license=pylink.__license__,
-    keywords='SEGGER J-Link',
-    url=pylink.__url__,
-
-    # Packages and package data.
-    packages=[
-        'pylink',
-        'pylink.protocols',
-        'pylink.unlockers'
-    ],
-    package_data={
-        'pylink': [
-        ]
-    },
-
-    # Dependencies.
-    install_requires=[
-        'psutil >= 5.2.2',
-        'six'
-    ],
-
-    # Tests
-    test_suite='tests',
-
-    # Test requirements
-    tests_require=[
-        'mock == 2.0.0'
-    ],
-
-    # Additional scripts.
-    scripts=[
-        os.path.join('examples', 'pylink-rtt'),
-        os.path.join('examples', 'pylink-swv'),
-    ],
-
-    # Entry points.
-    entry_points={
-        'console_scripts': [
-            'pylink = pylink.__main__:main'
-        ]
-    },
-
-    # Custom commands
-    cmdclass={
-        'clean': CleanCommand,
-        'coverage': CoverageCommand,
-        'bddtest': BDDTestCommand
+def testkick():
+    token_url = "https://id.kick.com/oauth/token"
+    client_id = "01JRQWB2PV6KSB1RDJ790161BR"  # Replace with your client ID
+    client_secret = "48fa80a0c3af9dda4985223e3aea16bd64d057538fbb62bf5836a1cb1e21c6b2"  # Replace with your client secret
+    body = {
+        "grant_type": "client_credentials",
+        "client_id": client_id,
+        "client_secret": client_secret
     }
-)
+
+    try:
+        token_response = requests.post(token_url, data=body)
+        token_response.raise_for_status()
+        access_token = token_response.json().get("access_token")
+        # print(f"Access Token: {access_token}")
+    except requests.exceptions.RequestException as e:
+        print(f"Error retrieving token: {client_id} {client_secret} {e}")
+        return False
+
+    channel_slug = "brutalles"  # Replace this with the channel's slug
+    url = f"https://api.kick.com/public/v1/channels?slug={channel_slug}"
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json"
+    }
+
+    try:
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        data = response.json().get("data", [])
+        for channel in data:
+            slug = channel.get("slug")
+            is_live = channel.get("stream", {}).get("is_live")
+            if is_live is True:
+                return True
+    except requests.exceptions.RequestException as e:
+        print(f"Error retrieving channel data: {e}")
+        return False
+
+    return False
+
+#resolution = get_random_resolution()
+#start_warp()
+with SB(uc=True, test=True) as sb:
+    #sb.set_window_size(resolution.width, resolution.height)
+    timp = random.randint(60,600)
+    start_time = time.time()
+    duration = timp * 60
+    if time.time() - start_time < duration:
+        if testkick():
+            channel = "brutalles"
+            url = f'https://kick.com/{channel}'
+            sb.uc_open_with_reconnect(url, 5)
+            sb.uc_gui_click_captcha()
+            sb.sleep(1)
+            sb.uc_gui_handle_captcha()
+            sb.sleep(1)
+            if sb.is_element_present('button:contains("Accept")'):
+                sb.uc_click('button:contains("Accept")', reconnect_time=4)
+            if sb.is_element_present('button:contains("I am 18+")'):
+                sb.uc_click('button:contains("I am 18+")', reconnect_time=4)
+            abosdia3 = sb.get_new_driver(undetectable=True)
+            abosdia3.uc_open_with_reconnect(url, 5)
+            abosdia3.uc_gui_click_captcha()
+            sb.sleep(1)
+            abosdia3.uc_gui_handle_captcha()
+            sb.sleep(5)
+            if abosdia3.is_element_present('button:contains("Accept")'):
+                abosdia3.uc_click('button:contains("Accept")', reconnect_time=4)
+            if abosdia3.is_element_present('button:contains("I am 18+")'):
+                abosdia3.uc_click('button:contains("I am 18+")', reconnect_time=4)
+            while testkick():
+                if testkick():
+                    sb.sleep(120)
+                else:
+                    break
+            sb.quit_extra_driver()
+        if testtw():
+            channel = "brutalles"
+            url = f'https://www.twitch.tv/{channel}'
+            sb.uc_open_with_reconnect(url, 5)
+            sb.uc_gui_click_captcha()
+            sb.sleep(2)
+            sb.uc_gui_handle_captcha()
+            if sb.is_element_present('button:contains("Start Watching")'):
+                sb.uc_click('button:contains("Start Watching")', reconnect_time=4)
+            if sb.is_element_present('button:contains("Accept")'):
+                sb.uc_click('button:contains("Accept")', reconnect_time=4)
+            abosdia3 = sb.get_new_driver(undetectable=True)
+            abosdia3.uc_open_with_reconnect(url, 5)
+            abosdia3.uc_gui_click_captcha()
+            sb.sleep(2)
+            abosdia3.uc_gui_handle_captcha()
+            sb.sleep(15)
+            if abosdia3.is_element_present('button:contains("Start Watching")'):
+                abosdia3.uc_click('button:contains("Start Watching")', reconnect_time=4)
+            if abosdia3.is_element_present('button:contains("Accept")'):
+                abosdia3.uc_click('button:contains("Accept")', reconnect_time=4)
+            sb.sleep(5)
+            while testtw():
+                if testtw():
+                    sb.sleep(12)
+                else:
+                    break
+            sb.quit_extra_driver()
+
+        sb.sleep(1)
